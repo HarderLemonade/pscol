@@ -1,37 +1,94 @@
 #!/usr/bin/env bash
 # pscol - interactive PS1 color selector
+# License: GPL-2.0
 # Author: Ben @ LostGeek.NET
+# Version: 0.2
 
 BASHRC="$HOME/.bashrc"
+BACKUP="$HOME/.bashrc.bak"
 
-# Palette: light green + similar readable colors
+## backup config (0 = no, 1 = yes)
+keep_original=1
+keep_last=0
+
+# Palette: light colors + darker companion colors
 declare -A COLORS=(
-  [1]="1;32" # Light Green
-  [2]="1;36" # Light Cyan
-  [3]="1;34" # Light Blue
-  [4]="1;35" # Light Magenta
-  [5]="1;33" # Light Yellow
+  [1]="1;32"   # Light Green
+  [2]="1;36"   # Light Cyan
+  [3]="1;34"   # Light Blue
+  [4]="1;35"   # Light Magenta
+  [5]="1;33"   # Light Yellow
+  [6]="0;32"   # Green
+  [7]="0;36"   # Cyan
+  [8]="0;34"   # Blue
+  [9]="0;35"   # Magenta
+  [10]="0;33"  # Yellow
 )
 
-# Detect existing PS1 color in .bashrc
-CURRENT_COLOR=$(grep -oP 'PS1=.*\\\[\\e\[\K[0-9;]+(?=m\\\])' "$BASHRC" | head -1)
-if [[ -n "$CURRENT_COLOR" ]]; then
-    COLORS[0]="$CURRENT_COLOR"
-    echo "Current PS1 color detected: $CURRENT_COLOR"
-else
-    COLORS[0]="1;32"  # fallback
-fi
+declare -A NAMES=(
+  [1]="Light Green"
+  [2]="Light Cyan"
+  [3]="Light Blue"
+  [4]="Light Magenta"
+  [5]="Light Yellow"
+  [6]="Green"
+  [7]="Cyan"
+  [8]="Blue"
+  [9]="Magenta"
+  [10]="Yellow"
+)
+
+die() {
+    echo "Error: $*" >&2
+    exit 1
+}
+
+backup_bashrc() {
+    [[ "$keep_original" -eq 1 ]] || return 0
+
+    if [[ "$keep_last" -eq 1 ]]; then
+        bash -n "$BASHRC" >/dev/null 2>&1 || die "Syntax check failed for $BASHRC. Refusing to overwrite ~/.bashrc.bak."
+        cp -- "$BASHRC" "$BACKUP" || die "Failed to overwrite $BACKUP"
+        return 0
+    fi
+
+    if [[ ! -e "$BACKUP" ]]; then
+        cp -- "$BASHRC" "$BACKUP" || die "Failed to create $BACKUP"
+        cat <<'EOF'
+
+Your original .bashrc configuration has been copied to ~/.bashrc.bak
+On subsequent runs of pscol, we check for the presence of .bashrc.bak,
+a fresh backup copy will only be made if the file does not exist...
+You may change this behavior by editing pscol directly, in the 'backup config' section
+
+EOF
+    fi
+}
+
+[[ -f "$BASHRC" ]] || die "~/.bashrc not found"
+
+backup_bashrc
 
 USERHOST="$USER@$HOSTNAME"
 
 echo "=== Available PS1 colors for user@host ==="
-for i in $(seq 0 5); do
-    color_code="${COLORS[$i]}"
-    printf "[%d] \e[%sm%s\e[0m\n" "$i" "$color_code" "$USERHOST"
+echo
+
+for left in 1 2 3 4 5; do
+    right=$((left + 5))
+
+    printf "[%d] %-14s " "$left" "${NAMES[$left]}"
+    printf "\e[%sm%s\e[0m" "${COLORS[$left]}" "$USERHOST"
+
+    printf "    "
+
+    printf "[%d] %-14s " "$right" "${NAMES[$right]}"
+    printf "\e[%sm%s\e[0m\n" "${COLORS[$right]}" "$USERHOST"
 done
 
 echo
 read -rp "Select color by number: " CHOICE
+
 if [[ -z "${COLORS[$CHOICE]}" ]]; then
     echo "Invalid selection. Exiting."
     exit 1
@@ -40,17 +97,44 @@ fi
 NEW_COLOR="${COLORS[$CHOICE]}"
 echo "Updating PS1 to color code $NEW_COLOR..."
 
-# Only color the user@host; directory stays default
-NEW_PS1="PS1=\"\\[\\e[${NEW_COLOR}m\\]\\u@\\h\\[\\e[0m\\]:\\w\\$ \""
+NEW_PS1="PS1='\\[\\e[${NEW_COLOR}m\\]\\u@\\h\\[\\e[0m\\]:\\w\\$ '"
 
-# Replace or append in .bashrc safely
+TMPFILE="$(mktemp)" || die "Failed to create temporary file"
+
 if grep -q "^PS1=" "$BASHRC"; then
-    sed -i "/^PS1=/c\\$NEW_PS1" "$BASHRC"
+    awk -v new_ps1="$NEW_PS1" '
+        BEGIN { done=0 }
+        {
+            if (!done && /^PS1=/) {
+                print new_ps1
+                done=1
+                next
+            }
+            print
+        }
+    ' "$BASHRC" > "$TMPFILE" || die "Failed to update $BASHRC"
 else
-    echo "$NEW_PS1" >> "$BASHRC"
+    cat "$BASHRC" > "$TMPFILE" || die "Failed to read $BASHRC"
+    printf '%s\n' "$NEW_PS1" >> "$TMPFILE"
 fi
 
-# Auto-reload
-source "$BASHRC"
+bash -n "$TMPFILE" >/dev/null 2>&1 || {
+    rm -f "$TMPFILE"
+    die "Syntax check failed for updated .bashrc"
+}
 
-echo "Done! PS1 updated and reloaded."
+mv -- "$TMPFILE" "$BASHRC" || die "Failed to write updated $BASHRC"
+
+echo
+echo "Done!"
+echo
+echo "To apply the change now, run:"
+echo "source ~/.bashrc"
+echo
+echo "Or log out and log back in."
+
+if [[ -e "$BACKUP" ]]; then
+    echo
+    echo "Backup file: ~/.bashrc.bak"
+    echo "You may remove it if you wish."
+fi
