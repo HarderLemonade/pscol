@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# pscol - interactive PS1 color selector
+# Author: Ben @ LostGeek.NET
+
+BASHRC="$HOME/.bashrc"
+
+# Palette: light green + similar readable colors
+declare -A COLORS=(
+  [1]="1;32" # Light Green
+  [2]="1;36" # Light Cyan
+  [3]="1;34" # Light Blue
+  [4]="1;35" # Light Magenta
+  [5]="1;33" # Light Yellow
+)
+
+# Detect existing PS1 color in .bashrc
+CURRENT_COLOR=$(grep -oP 'PS1=.*\\\[\\e\[\K[0-9;]+(?=m\\\])' "$BASHRC" | head -1)
+if [[ -n "$CURRENT_COLOR" ]]; then
+    COLORS[0]="$CURRENT_COLOR"
+    echo "Current PS1 color detected: $CURRENT_COLOR"
+else
+    COLORS[0]="1;32"  # fallback
+fi
+
+USERHOST="$USER@$HOSTNAME"
+
+echo "=== Available PS1 colors for user@host ==="
+for i in $(seq 0 5); do
+    color_code="${COLORS[$i]}"
+    printf "[%d] \e[%sm%s\e[0m\n" "$i" "$color_code" "$USERHOST"
+done
+
+echo
+read -rp "Select color by number: " CHOICE
+if [[ -z "${COLORS[$CHOICE]}" ]]; then
+    echo "Invalid selection. Exiting."
+    exit 1
+fi
+
+NEW_COLOR="${COLORS[$CHOICE]}"
+echo "Updating PS1 to color code $NEW_COLOR..."
+
+# Only color the user@host; directory stays default
+NEW_PS1="PS1=\"\\[\\e[${NEW_COLOR}m\\]\\u@\\h\\[\\e[0m\\]:\\w\\$ \""
+
+# Replace or append in .bashrc safely
+if grep -q "^PS1=" "$BASHRC"; then
+    sed -i "/^PS1=/c\\$NEW_PS1" "$BASHRC"
+else
+    echo "$NEW_PS1" >> "$BASHRC"
+fi
+
+# Auto-reload
+source "$BASHRC"
+
+echo "Done! PS1 updated and reloaded."
